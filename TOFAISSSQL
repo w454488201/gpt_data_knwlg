@@ -1,0 +1,63 @@
+###5.11版本的，用来把数据embedding并且传入faiss和mysql 的脚本。
+
+
+import pandas as pd
+import mysql.connector
+import faiss
+import openai
+from openai.embeddings_utils import get_embedding
+import numpy as np
+
+openai.api_key = "your_openai_key"
+
+embedding_model = "text-embedding-ada-002"
+embedding_encoding = "cl100k_base"  # this the encoding for text-embedding-ada-002
+max_tokens = 8000  # the maximum for text-embedding-ada-002 is 8191
+
+# Read CSV data into a DataFrame
+df = pd.read_csv("your/path/to")
+
+# Connect to MySQL database
+cnx = mysql.connector.connect(user='user', password='password', host='host', database='database')
+cursor = cnx.cursor()
+
+cursor.execute("""
+    CREATE TABLE IF NOT EXISTS name_table (
+      index1 INT,
+      title TEXT,
+      content TEXT,
+      combined TEXT,
+      n_tokens INT,
+      eng_combined TEXT,
+      PRIMARY KEY (index1)
+    )CHARACTER SET utf8;
+""")
+
+# Insert DataFrame data into MySQL database
+for row in df.itertuples():
+    cursor.execute("INSERT INTO name_table (index1, title, content, combined, n_tokens, eng_combined) VALUES (%s, %s, %s, %s, %s, %s)", (row.index1, row.title, row.content, row.combined, row.n_tokens, row.eng_combined))
+cnx.commit()
+
+# Retrieve data from MySQL database
+cursor.execute("SELECT * FROM name_table")
+data = cursor.fetchall()
+
+# Convert data to DataFrame
+df = pd.DataFrame(data, columns=["index1", "title", "content", "combined", "n_tokens", "eng_combined"])
+
+# Embed text data using OpenAI's text embedding tool
+df["embedding"] = df.eng_combined.apply(lambda x: get_embedding(x, engine=embedding_model))
+
+# Convert embeddings to numpy array
+embeddings = np.array(df["embedding"].tolist(), dtype=np.float32)
+
+# Create an index for fast vector retrieval
+d = len(embeddings[0])  # The dimension of the embeddings
+nlist = 4  #这里需要注意，如果数据集特别小，这里nlist也要小。
+quantizer = faiss.IndexFlatL2(d)  # The index for clustering
+index = faiss.IndexIVFFlat(quantizer, d, nlist, faiss.METRIC_L2)
+index.train(embeddings)
+index.add(embeddings)
+
+# Save the index to a file
+faiss.write_index(index, "your_faiss.index")
