@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <title>对话界面</title>
+    <!-- 添加 Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.0/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <style>
+      .bottom-left {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        padding: 10px;
+      }
+      body {
+        font-family: Arial, sans-serif;
+        background-color: #f0f0f0;
+        margin: 0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+      }
+
+      #chat-container {
+        background-color: white;
+        width: 75%;
+        margin: auto;
+        padding: 20px;
+        box-sizing: border-box;
+        height: 65%;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+
+      #chat-history {
+        border: 1px solid #ccc;
+        padding: 20px;
+        height: calc(100% - 70px);
+        overflow-y: scroll;
+        margin-bottom: 20px;
+      }
+
+      .message {
+        margin-bottom: 10px;
+      }
+
+      .user-input {
+        font-weight: bold;
+      }
+
+      .bot-response {
+        font-style: italic;
+      }
+       input[type="text"] {
+        width: 100%;
+      }
+    </style>
+
+    <!-- 在head标签中添加jQuery库 -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  </head>
+  <body>
+    <div id="chat-container">
+      <div id="chat-history">
+        {% for message in chat_history[-5:] %}
+          <div class="message">
+            <span class="user-input">{{ message[0] }}</span><br>
+            <span class="bot-response">{{ message[1] }}</span>
+          </div>
+        {% endfor %}
+      </div>
+
+      <!-- 在body标签内添加一个<span>元素来显示“正在打字…”提示，并将其设置为默认隐藏 -->
+      <span id="typing" style="display:none;">本服务器能力有限，每次回复大约需要10秒钟，如果更久就再等等，正在打字<span id="dots"></span></span>
+
+      <form method="POST" action="{{url_for('chat_page') }}">
+        <input type="text" name="user_input" placeholder="在此输入内容" required>
+        <button type="submit">发送</button>
+      </form>
+    </div>
+    <!-- 保留修改后的 JavaScript 代码 -->
+    <script>
+        $(document).ready(function () {
+            // 当表单提交时
+            $("form").submit(function (event) {
+                event.preventDefault();
+                // 显示“正在打字…”提示
+                $("#typing").show();
+                // 初始化 dots 变量
+                let dots = ".";
+                // 设置 dots 动态变化
+                const typingDots = setInterval(function () {
+                    dots = dots.length < 3 ? dots + "." : ".";
+                    $("#dots").text(dots);
+                }, 500);
+
+                // 发送请求
+                $.ajax({
+                    type: "POST",
+                    url: "{{ url_for('chat_page') }}",
+                    data: {user_input: $("input[name='user_input']").val()},
+                    success: function (response) {
+                        // 清除 dots 动画
+                        clearInterval(typingDots);
+                        // 隐藏“正在打字…”提示
+                        $("#typing").hide();
+                        // 添加聊天记录到页面
+                        var messageDiv = $('<div class="message"></div>');
+                        $('<span class="user-input"></span>').text($("input[name='user_input']").val()).appendTo(messageDiv);
+                        $('<br>').appendTo(messageDiv);
+                        $('<span class="bot-response"></span>').text(response).appendTo(messageDiv);
+                        messageDiv.appendTo("#chat-history");
+                        // 清除输入框
+                        $("input[name='user_input']").val("");
+                    }
+                });
+            });
+        });
+    </script>
+  </body>
+</html>
