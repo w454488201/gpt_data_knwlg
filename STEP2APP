@@ -1,0 +1,158 @@
+# -*- coding: utf-8 -*-
+
+import pandas as pd
+import numpy as np
+from openai.embeddings_utils import get_embedding, cosine_similarity
+import openai
+from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, session
+from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
+from flask_session import Session
+import pymysql
+import faiss
+import os
+import redis
+
+os.environ["OPENAI_API_KEY"] = "replace_with_your_API_key" 
+openai.api_key = os.getenv("OPENAI_API_KEY")
+embedding_model = "text-embedding-ada-002"
+embedding_encoding = "cl100k_base"
+max_tokens = 8000
+COMPLETIONS_MODEL = "gpt-3.5-turbo"
+
+# Read the dataframe from the MySQL table
+
+# Load the index from the file
+index = faiss.read_index("your_faiss.index")
+
+app = Flask(__name__, template_folder='your/path/to/html')
+app.config['SECRET_KEY'] = 'your_key'
+
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+pymysql://user:password@host/databases'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db = SQLAlchemy(app)
+migrate = Migrate(app, db)
+
+
+# Add this line after initializing your Flask app
+app.config['SESSION_TYPE'] = 'redis'
+app.config['SESSION_REDIS'] = redis.Redis(host='host', port=port, db=0)  # Use your Redis host and port
+app.config['SESSION_PERMANENT'] = False
+
+# Database connection
+connection = pymysql.connect(
+    host='host',
+    port=port,
+    user='user',
+    password='password',
+    database='database'
+)
+# Create table if not exists
+def create_table():
+    cursor = connection.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS your_table (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_input TEXT NOT NULL,
+            response TEXT NOT NULL
+        )
+    """)
+
+# Call the create_table function after initializing the database
+create_table()
+
+with app.app_context():
+    df = pd.read_sql("SELECT * FROM your_table", connection)
+
+class Conversation(db.Model):
+    __tablename__ = "your_table"
+    id = db.Column(db.Integer, primary_key=True)
+    user_input = db.Column(db.Text, nullable=False)
+    response = db.Column(db.Text, nullable=False)
+
+
+
+chat_history = []
+
+def generate_response(user_input, text, chat_history):
+    print("1111111111111111111111",text)   #这是我用来测试文本内容和gpt回复是否相适应的。3.5的灵活度要大于达芬奇。他们对于材料的解释似乎差别挺大的
+    system_message = f"你是一个信息管理员，首先检查问题与这里的context是否相关,然后只根据context后（）的内容回答问题。(\n\nContext:\n{text})如果没找到相关内容，不管问题是什么，一律只回复不知道"
+    messages = [{"role": "system", "content": system_message}]
+
+    # Add chat_history to messages
+    for history_item in chat_history:
+        user_message, response_message, _ = history_item
+        messages.append({"role": "user", "content": user_message})
+        messages.append({"role": "assistant", "content": response_message})
+
+    messages.append({"role": "user", "content": user_input})
+
+    completion = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",  # 或者你选择的其他聊天模型   注意其他模型前面的ChatCompletion要改的，不是同一个api地址
+        messages=messages,
+        max_tokens=2000,
+        top_p=0.3,
+        frequency_penalty=0,
+        presence_penalty=0,
+        temperature=0.1,
+    )
+
+    response = completion.choices[0].message
+    response = response["content"]
+    return response
+
+
+def search_reviews(user_input):
+    global chat_history
+
+    product_embedding = np.array(get_embedding(
+        user_input,
+        engine=embedding_model
+    ))
+    k = 2  # Number of results to return
+    _, indices = index.search(product_embedding.reshape(1, -1), k)
+    results = df.iloc[indices[0]]
+
+    context = []
+    for i, row in results.iterrows():
+        context.append(row['content'])
+
+    text = "\n".join(context)
+    response = generate_response(user_input, text, chat_history)
+
+    if len(chat_history) >= 3:
+        chat_history.pop(0)
+    chat_history.append((user_input, response, text))
+
+    # Add conversation to database
+    conversation = Conversation(user_input=user_input, response=response)
+    print(user_input)
+    print(response)
+    db.session.add(conversation)
+    db.session.commit()
+
+    return response
+
+
+@app.route('/', methods=['GET', 'POST'])
+def chat_page():
+    if request.method == 'POST':
+        user_input = request.form['user_input']
+        response = search_reviews(user_input)
+
+        if 'chat_history' not in session:
+            session['chat_history'] = []
+
+        if len(session['chat_history']) >= 3:
+            session['chat_history'].pop(0)
+        session['chat_history'].append((user_input, response))
+
+        session.modified = True
+
+        return jsonify(response)
+
+    chat_history = session.get('chat_history', [])
+    return render_template('your_html', chat_history=chat_history)
+
+if __name__ == '__main__':
+    app.run(host='host', port=port, debug=True, threaded=True)
