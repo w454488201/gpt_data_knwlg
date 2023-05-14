@@ -1,0 +1,63 @@
+###5.11版本 用来纯翻译从中文到英文。并且生成的是csv，读取的是xlsx
+
+import pandas as pd
+import requests
+import json
+import random
+import hashlib
+import re
+
+
+def translate(text, appid, secretKey):
+    salt = str(random.randint(32768, 65536))
+    sign = hashlib.md5((appid + str(text) + salt + secretKey).encode('utf-8')).hexdigest()
+    params = {'q': text, 'from': 'zh', 'to': 'en', 'appid': appid, 'salt': salt, 'sign': sign}
+    response = requests.get(url, params=params)
+
+    if response.status_code == 200:
+        response_json = json.loads(response.content)
+        if 'trans_result' in response_json:
+            return response_json['trans_result'][0]['dst']
+    return None
+
+
+def process_text(text, appid, secretKey):
+    segments = re.split(r'(\W+)', text)
+    translated_segments = []
+
+    for segment in segments:
+        if re.search(r'[a-zA-Z]', segment):
+            print(segment)
+            translated_segments.append(segment)
+        elif re.search(r'[\u4e00-\u9fff]+', segment):
+            print(segment)
+            translation = translate(segment, appid, secretKey)
+            if translation:
+                translated_segments.append(translation)
+            else:
+                translated_segments.append(segment)
+        else:
+            translated_segments.append(segment)
+
+    return ''.join(translated_segments)
+
+
+# 设置请求参数
+url = 'https://fanyi-api.baidu.com/api/trans/vip/translate'
+appid = 'your_id'
+secretKey = 'your_key'
+
+# 读取CSV文件
+csv_file_path = r"your/path"
+df = pd.read_excel(csv_file_path)
+
+# 翻译中文列
+df['eng_title'] = df['title'].apply(lambda x: process_text(x, appid, secretKey))
+df['en_content'] = df['content'].apply(lambda x: process_text(x, appid, secretKey))
+
+# 打印结果
+print(df)
+
+# 将结果保存到csv文件
+output_csv_file_path = r"your/path"
+df.to_csv(output_csv_file_path, index=False)
